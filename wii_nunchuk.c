@@ -18,18 +18,18 @@
 		m.buf = b; \
 	} while (0)
 
-#define MASK_BUTTON_Z   0x01
-#define MASK_BUTTON_C   0x02
-#define MASK_ACCEL_X    0x0C
-#define MASK_ACCEL_Y    0x40
-#define MASK_ACCEL_Z    0xC0
+#define MASK_BUTTON_Z	0x01
+#define MASK_BUTTON_C	0x02
+#define MASK_ACCEL_X	0x0C
+#define MASK_ACCEL_Y	0x40
+#define MASK_ACCEL_Z	0xC0
 
-#define BUTTON_Z(a)     (a & MASK_BUTTON_Z)
-#define BUTTON_C(a)     ((a & MASK_BUTTON_C) >> 1)
+#define BUTTON_Z(a)	(a & MASK_BUTTON_Z)
+#define BUTTON_C(a)	((a & MASK_BUTTON_C) >> 1)
 
-#define ACCEL_X(a, b)   ((a << 2) | ((b & MASK_ACCEL_X) >> 2))
-#define ACCEL_Y(a, b)   ((a << 2) | ((b & MASK_ACCEL_X) >> 4))
-#define ACCEL_Z(a, b)   ((a << 2) | ((b & MASK_ACCEL_X) >> 6))
+#define ACCEL_X(a, b)	((a << 2) | ((b & MASK_ACCEL_X) >> 2))
+#define ACCEL_Y(a, b)	((a << 2) | ((b & MASK_ACCEL_X) >> 4))
+#define ACCEL_Z(a, b)	((a << 2) | ((b & MASK_ACCEL_X) >> 6))
 
 struct wii_nunchuk_dev {
 	struct input_polled_dev *polled_dev;
@@ -74,25 +74,17 @@ static int wii_nunchuk_read_regs(struct i2c_client *client,
 
 	ret = i2c_master_send(client, outbuf, 1);
 	if (ret < 0)
-	{
 		goto failure;
-	}
 	else if (ret != 1)
-	{
 		goto io_failure;
-	}
 
 	mdelay(10);
 
 	ret = i2c_master_recv(client, inbuf, 6);
 	if (ret < 0)
-	{
 		goto failure;
-	}
 	else if (ret != 6)
-	{
 		goto io_failure;
-	}
 
 	sensors->joystickX = inbuf[0];
 	sensors->joystickY = inbuf[1];
@@ -107,10 +99,10 @@ static int wii_nunchuk_read_regs(struct i2c_client *client,
 	return 0;
 
  io_failure:
- 	ret = -EIO;
+	ret = -EIO;
 
  failure:
- 	return ret;
+	return ret;
 }
 
 static void poll_regs(struct input_polled_dev *dev)
@@ -121,8 +113,7 @@ static void poll_regs(struct input_polled_dev *dev)
 	int ret;
 
 	ret = wii_nunchuk_read_regs(nunchuk->i2c_client, &sensors);
-	if (ret < 0)
-	{
+	if (ret < 0) {
 		dev_err(&nunchuk->i2c_client->dev,
 			"Error while reading registers\n");
 		return;
@@ -146,8 +137,7 @@ static int wii_nunchuk_polled_input_setup(struct i2c_client *client)
 
 	nunchuk = kzalloc(sizeof(struct wii_nunchuk_dev), GFP_KERNEL);
 	polled_dev = input_allocate_polled_device();
-	if (!nunchuk || !polled_dev)
-	{
+	if (!nunchuk || !polled_dev) {
 		dev_err(&client->dev, "Failed to allocate memory\n");
 		err = -ENOMEM;
 		goto failure_free_mem;
@@ -177,9 +167,7 @@ static int wii_nunchuk_polled_input_setup(struct i2c_client *client)
 
 	err = input_register_polled_device(polled_dev);
 	if (err)
-	{
 		goto failure_free_mem;
-	}
 
 	return 0;
 
@@ -199,44 +187,35 @@ static int wii_nunchuk_setup(struct i2c_client *client)
 	nunchuk_init_msg(client, msg, buf, 0xf0, 0x55);
 	ret = i2c_transfer(client->adapter, &msg, 1);
 	if (ret < 0)
-	{
 		goto failure;
-	}
 	else if (ret != 1)
-	{
 		goto io_failure;
-	}
 
 	mdelay(1); /* 1ms delay between messages */
 
 	nunchuk_init_msg(client, msg, buf, 0xfb, 0x00);
 	ret = i2c_transfer(client->adapter, &msg, 1);
 	if (ret < 0)
-	{
 		goto failure;
-	}
 	else if (ret != 1)
-	{
 		goto io_failure;
-	}
 
 	return 0;
 
  io_failure:
- 	ret = -EIO;
+	ret = -EIO;
 
  failure:
 	return ret;
 }
 
-static int __devinit wii_nunchuk_probe(struct i2c_client *client,
+static int wii_nunchuk_probe(struct i2c_client *client,
 	const struct i2c_device_id *id)
 {
 	int ret = 0;
 
 	ret = wii_nunchuk_setup(client);
-	if (ret < 0)
-	{
+	if (ret < 0) {
 		dev_err(&client->dev, "Device setup failed.\n");
 		goto failure;
 	}
@@ -244,8 +223,7 @@ static int __devinit wii_nunchuk_probe(struct i2c_client *client,
 	dev_info(&client->dev, "Wii Nunchuck reporting for duty!\n");
 
 	ret = wii_nunchuk_polled_input_setup(client);
-	if (ret < 0)
-	{
+	if (ret < 0) {
 		dev_err(&client->dev, "Filed to setup polled input.\n");
 		goto failure;
 	}
@@ -255,10 +233,10 @@ static int __devinit wii_nunchuk_probe(struct i2c_client *client,
  failure:
 	dev_err(&client->dev, "Wii Nunchuck dying in a lot of pain!\n");
 
-	return ret; 
+	return ret;
 }
 
-static int __devexit wii_nunchuk_remove(struct i2c_client *client)
+static int wii_nunchuk_remove(struct i2c_client *client)
 {
 	struct wii_nunchuk_dev *nunchuk = i2c_get_clientdata(client);
 
