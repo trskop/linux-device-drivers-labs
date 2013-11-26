@@ -1,10 +1,14 @@
 #include <linux/init.h>
+#include <linux/input-polldev.h>
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/delay.h>
+#include <linux/slab.h>
 
 
-#define nunchuk_init_msg(m, c, b, v1, v2) \
+#define POLL_INTERVAL	30	/* msec */
+
+#define nunchuk_init_msg(c, m, b, v1, v2) \
 	do { \
 		b[0] = v1; \
 		b[1] = v2; \
@@ -27,6 +31,23 @@
 #define ACCEL_Y(a, b)   ((a << 2) | ((b & MASK_ACCEL_X) >> 4))
 #define ACCEL_Z(a, b)   ((a << 2) | ((b & MASK_ACCEL_X) >> 6))
 
+struct wii_nunchuk_dev {
+	struct input_polled_dev *polled_dev;
+	struct i2c_client *i2c_client;
+};
+
+struct wii_nunchuk_sensors {
+	int joystickX;
+	int joystickY;
+
+	int accelX;
+	int accelY;
+	int accelZ;
+
+	int buttonZ;
+	int buttonC;
+};
+
 static const struct i2c_device_id wii_nunchuk_id[] = {
 	{ "wii_nunchuk", 0 },
 	{ }
@@ -39,51 +60,9 @@ static const struct of_device_id wii_nunchuk_dt_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, wii_nunchuk_dt_ids);
 
-static int wii_nunchuk_setup(struct i2c_client *client)
+static int wii_nunchuk_read_regs(struct i2c_client *client,
+	struct wii_nunchuk_sensors *sensors)
 {
-	struct i2c_msg msg;
-	int ret = 0;
-	u8 buf[2];
-
-	nunchuk_init_msg(msg, client, buf, 0xf0, 0x55);
-	ret = i2c_transfer(client->adapter, &msg, 1);
-	if (ret < 0)
-	{
-		goto transfer_failure;
-	}
-	else if (ret != 1)
-	{
-		goto io_failure;
-	}
-
-	mdelay(1); /* 1ms delay between messages */
-
-	nunchuk_init_msg(msg, client, buf, 0xfb, 0x00);
-	ret = i2c_transfer(client->adapter, &msg, 1);
-	if (ret < 0)
-	{
-		goto transfer_failure;
-	}
-	else if (ret != 1)
-	{
-		goto io_failure;
-	}
-
-	return 0;
-
- io_failure:
- 	ret = -EIO;
-
- transfer_failure:
-	dev_err(&client->dev, "Error in I2C transfer.");
-
-	return ret;
-}
-
-static int wii_nunchuk_read_regs(struct i2c_client *client)
-{
-	int accelX, accelY, accelZ;
-	int buttonZ, buttonC;
 	int ret = 0;
 
 	u8 outbuf[1];
@@ -96,7 +75,7 @@ static int wii_nunchuk_read_regs(struct i2c_client *client)
 	ret = i2c_master_send(client, outbuf, 1);
 	if (ret < 0)
 	{
-		goto transfer_failure;
+		goto failure;
 	}
 	else if (ret != 1)
 	{
@@ -108,34 +87,146 @@ static int wii_nunchuk_read_regs(struct i2c_client *client)
 	ret = i2c_master_recv(client, inbuf, 6);
 	if (ret < 0)
 	{
-		goto transfer_failure;
+		goto failure;
 	}
 	else if (ret != 6)
 	{
 		goto io_failure;
 	}
 
-	dev_info(&client->dev, "Joystick: %d/%d", inbuf[0], inbuf[1]);
+	sensors->joystickX = inbuf[0];
+	sensors->joystickY = inbuf[1];
 
-	accelX = ACCEL_X(inbuf[2], inbuf[5]);
-	accelY = ACCEL_Y(inbuf[3], inbuf[5]);
-	accelZ = ACCEL_Z(inbuf[4], inbuf[5]);
-	dev_info(&client->dev, "Accels: %d/%d/%d", accelX, accelY, accelZ);
+	sensors->accelX = ACCEL_X(inbuf[2], inbuf[5]);
+	sensors->accelY = ACCEL_Y(inbuf[3], inbuf[5]);
+	sensors->accelZ = ACCEL_Z(inbuf[4], inbuf[5]);
 
-	buttonZ = BUTTON_Z(inbuf[5]);
-	buttonC = BUTTON_C(inbuf[5]);
-	dev_info(&client->dev, "Buttons: %s/%s", (buttonZ ? "z" : "Z"),
-		(buttonC ? "c" : "C"));
+	sensors->buttonZ = BUTTON_Z(inbuf[5]);
+	sensors->buttonC = BUTTON_C(inbuf[5]);
 
 	return 0;
 
  io_failure:
  	ret = -EIO;
 
- transfer_failure:
-	dev_err(&client->dev, "Error in I2C transfer.");
-
+ failure:
  	return ret;
+}
+
+static void poll_regs(struct input_polled_dev *dev)
+{
+	struct wii_nunchuk_dev *nunchuk = dev->private;
+	struct input_dev *input_dev = nunchuk->polled_dev->input;
+	struct wii_nunchuk_sensors sensors;
+	int ret;
+
+	ret = wii_nunchuk_read_regs(nunchuk->i2c_client, &sensors);
+	if (ret < 0)
+	{
+		dev_err(&nunchuk->i2c_client->dev,
+			"Error while reading registers\n");
+		return;
+	}
+
+	input_report_abs(input_dev, ABS_X, sensors.joystickX);
+	input_report_abs(input_dev, ABS_Y, sensors.joystickY);
+
+	input_event(input_dev, EV_KEY, BTN_Z, sensors.buttonZ);
+	input_event(input_dev, EV_KEY, BTN_C, sensors.buttonC);
+
+	input_sync(input_dev);
+}
+
+static int wii_nunchuk_polled_input_setup(struct i2c_client *client)
+{
+	struct input_polled_dev *polled_dev;
+	struct input_dev *input;
+	struct wii_nunchuk_dev *nunchuk;
+	int err;
+
+	nunchuk = kzalloc(sizeof(struct wii_nunchuk_dev), GFP_KERNEL);
+	polled_dev = input_allocate_polled_device();
+	if (!nunchuk || !polled_dev)
+	{
+		dev_err(&client->dev, "Failed to allocate memory\n");
+		err = -ENOMEM;
+		goto failure_free_mem;
+	}
+
+	polled_dev->private = nunchuk;
+	polled_dev->poll = poll_regs;
+	polled_dev->poll_interval = POLL_INTERVAL;
+
+	input = polled_dev->input;
+	input->name = "Wii Nunchuk";
+	input->phys = "wii/nunchuk";
+	input->id.bustype = BUS_I2C;
+	input->dev.parent = &client->dev;
+
+	nunchuk->i2c_client = client;
+	nunchuk->polled_dev = polled_dev;
+	i2c_set_clientdata(client, nunchuk);
+
+	set_bit(EV_KEY, input->evbit);
+	set_bit(BTN_C, input->keybit);
+	set_bit(BTN_Z, input->keybit);
+
+	set_bit(EV_ABS, input->evbit);
+	input_set_abs_params(input, ABS_X, 1, 256, 0, 0);
+	input_set_abs_params(input, ABS_Y, 1, 256, 0, 0);
+
+	err = input_register_polled_device(polled_dev);
+	if (err)
+	{
+		goto failure_free_mem;
+	}
+
+	return 0;
+
+ failure_free_mem:
+	input_free_polled_device(polled_dev);
+	kfree(nunchuk);
+
+	return -err;
+}
+
+static int wii_nunchuk_setup(struct i2c_client *client)
+{
+	struct i2c_msg msg;
+	int ret = 0;
+	u8 buf[2];
+
+	nunchuk_init_msg(client, msg, buf, 0xf0, 0x55);
+	ret = i2c_transfer(client->adapter, &msg, 1);
+	if (ret < 0)
+	{
+		goto failure;
+	}
+	else if (ret != 1)
+	{
+		goto io_failure;
+	}
+
+	mdelay(1); /* 1ms delay between messages */
+
+	nunchuk_init_msg(client, msg, buf, 0xfb, 0x00);
+	ret = i2c_transfer(client->adapter, &msg, 1);
+	if (ret < 0)
+	{
+		goto failure;
+	}
+	else if (ret != 1)
+	{
+		goto io_failure;
+	}
+
+	return 0;
+
+ io_failure:
+ 	ret = -EIO;
+
+ failure:
+	return ret;
 }
 
 static int __devinit wii_nunchuk_probe(struct i2c_client *client,
@@ -146,14 +237,16 @@ static int __devinit wii_nunchuk_probe(struct i2c_client *client,
 	ret = wii_nunchuk_setup(client);
 	if (ret < 0)
 	{
+		dev_err(&client->dev, "Device setup failed.\n");
 		goto failure;
 	}
 
 	dev_info(&client->dev, "Wii Nunchuck reporting for duty!\n");
 
-	ret = wii_nunchuk_read_regs(client);
+	ret = wii_nunchuk_polled_input_setup(client);
 	if (ret < 0)
 	{
+		dev_err(&client->dev, "Filed to setup polled input.\n");
 		goto failure;
 	}
 
@@ -167,6 +260,13 @@ static int __devinit wii_nunchuk_probe(struct i2c_client *client,
 
 static int __devexit wii_nunchuk_remove(struct i2c_client *client)
 {
+	struct wii_nunchuk_dev *nunchuk = i2c_get_clientdata(client);
+
+	input_unregister_polled_device(nunchuk->polled_dev);
+	input_free_polled_device(nunchuk->polled_dev);
+	kfree(nunchuk);
+	i2c_set_clientdata(client, NULL);
+
 	dev_info(&client->dev, "Wii Nunchuk dying in honor!\n");
 
 	return 0;
