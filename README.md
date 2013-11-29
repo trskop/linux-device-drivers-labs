@@ -1,17 +1,21 @@
 # Description
 
 Some of us in [Unify][Unify homepage] attended Linux Device Drivers training,
-held in our development department in [Brno][Wikipedia: Brno] in days between
-*25th and 29th November 2013*.
+held in our development department in [Brno][Wikipedia: Brno] starting on
+25th and ending on 29th November 2013.
 
 Our trainer for the week was [Anton Arapov][Anton Arapov at G+] from
 [RedHat][Wikipedia: RedHat].
 
-During the week long session we experimented with connecting [Wii Nunchuck][
-Wikipedia: Wii] to [Raspberry Pi][Wikipedia: Raspberry Pi] and also with its
-UART.
+During the week long session we experimented with connecting
+[Wii Nunchuck][Wikipedia: Wii] to [Raspberry Pi][Wikipedia: Raspberry Pi] and
+also with its UART.
 
 This repository contains my own solutions.
+
+Only after publishing the repository I noticed that commit times and dates are
+off. This was due to unsychronized time on the virtual machine I used during
+the session.
 
 
 [Anton Arapov at G+]:
