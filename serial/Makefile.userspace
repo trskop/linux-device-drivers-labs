@@ -1,0 +1,13 @@
+TARGETS := serial-get-counter serial-reset-counter
+
+BUILDROOT := $(HOME)/buildroot
+PATH := $(BUILDROOT)/output/host/usr/bin/:$(PATH)
+export PATH
+
+CROSS_COMPILE = arm-buildroot-linux-uclibcgnueabi-
+CC = $(CROSS_COMPILE)gcc
+
+all: $(TARGETS)
+
+clean:
+	rm -f $(TARGETS)
