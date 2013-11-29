@@ -7,9 +7,9 @@ held in our development department in [Brno][Wikipedia: Brno] starting on
 Our trainer for the week was [Anton Arapov][Anton Arapov at G+] from
 [RedHat][Wikipedia: RedHat].
 
-During the week long session we experimented with connecting
-[Wii Nunchuck][Wikipedia: Wii] to [Raspberry Pi][Wikipedia: Raspberry Pi] and
-also with its UART.
+During the week long session we experimented with connecting [Wii
+Nunchuck][Wikipedia: Wii Remote -- Nunchuk] to [Raspberry Pi][Wikipedia:
+Raspberry Pi] and also with its UART.
 
 This repository contains my own solutions.
 
